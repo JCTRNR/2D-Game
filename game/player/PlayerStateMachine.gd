@@ -1,6 +1,8 @@
 class_name PlayerStateMachine
 extends Node
 
+signal state_changed(state_name: String)
+
 var states: Dictionary = {}
 var current_state: PlayerState = null
 
@@ -9,7 +11,7 @@ func _ready() -> void:
 	for child in get_children():
 		if child is PlayerState:
 			states[child.name] = child
-			child.sm = self
+			child.sm     = self
 			child.player = get_parent() as Player
 
 func transition_to(state_name: String, params: Dictionary = {}) -> void:
@@ -23,11 +25,13 @@ func transition_to(state_name: String, params: Dictionary = {}) -> void:
 		current_state.exit()
 	current_state = next
 	current_state.enter(params)
+	state_changed.emit(state_name)
 
 func start(initial_state: String) -> void:
 	current_state = states.get(initial_state)
 	if current_state:
 		current_state.enter()
+	state_changed.emit(initial_state)
 
 func _process(delta: float) -> void:
 	if current_state:
@@ -36,10 +40,13 @@ func _process(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if current_state:
 		current_state.physics_update(delta)
-	# Flush one-shot inputs after every physics tick so presses are never missed
+
+	# Apply movement after state sets velocity this frame
 	var p := get_parent() as Player
-	if p and p.input:
-		p.input.flush()
+	if p:
+		p.move_and_slide()
+		if p.input:
+			p.input.flush()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if current_state:

@@ -18,7 +18,7 @@ var hitbox: Hitbox
 var hurtbox: Hurtbox
 var state_machine: EnemyStateMachine
 
-var _visual: Polygon2D
+var _sprite: EnemySprite
 var _hitbox_pivot: Node2D
 
 const GRAVITY      := 2800.0
@@ -41,7 +41,7 @@ func apply_gravity(delta: float) -> void:
 func update_facing(direction: float) -> void:
 	if not is_zero_approx(direction):
 		facing = sign(direction)
-		_visual.scale.x = facing
+		_sprite.flip_h = facing < 0.0
 		_hitbox_pivot.scale.x = facing
 
 func can_see_player() -> bool:
@@ -54,6 +54,18 @@ func get_player() -> CharacterBody2D:
 	return get_tree().get_first_node_in_group("player") as CharacterBody2D
 
 # ── Hit reception ─────────────────────────────────────────────────────────────
+func take_hit(hit_data) -> void:
+	var hd: HitData
+	if hit_data is HitData:
+		hd = hit_data
+	else:
+		hd = HitData.new()
+		if typeof(hit_data) == TYPE_DICTIONARY:
+			hd.damage        = int(hit_data.get("damage", 1))
+			hd.knockback     = hit_data.get("knockback", Vector2(360.0, -120.0))
+			hd.stagger_value = float(hit_data.get("stagger_value", 20.0))
+	_on_hurtbox_received_hit(hd)
+
 func _on_hurtbox_received_hit(hit_data: HitData) -> void:
 	if state_machine.current_state is EnemyDeadState:
 		return
@@ -63,16 +75,17 @@ func _on_hurtbox_received_hit(hit_data: HitData) -> void:
 		if shield.try_absorb(hit_data):
 			return
 
-	health.take_damage(hit_data.damage)
+	health.damage(hit_data.damage)
 	stagger.add_stagger(hit_data.stagger_value)
 
 func _on_staggered() -> void:
+	var player := get_player()
+	var away_dir := 1.0
+	if player:
+		away_dir = sign(global_position.x - player.global_position.x)
 	if not (state_machine.current_state is EnemyDeadState):
-		state_machine.transition_to("EnemyStaggerState", {"knockback": Vector2(300.0, -100.0)})
-	# Brief white flash to confirm the stagger
-	_visual.color = Color.WHITE
-	var tween := create_tween()
-	tween.tween_property(_visual, "color", Color(0.85, 0.2, 0.2), 0.18)
+		state_machine.transition_to("EnemyStaggerState", {"knockback": Vector2(300.0 * away_dir, -100.0)})
+	_sprite.flash_stagger()
 
 func _on_hit_landed(target_hurtbox: Hurtbox, hit_data: HitData) -> void:
 	target_hurtbox.apply_hit(hit_data)
@@ -89,16 +102,13 @@ func _build_collision() -> void:
 	var shape := RectangleShape2D.new()
 	shape.size = Vector2(36.0, 56.0)
 	col.shape  = shape
+	col.position = Vector2(0.0, -shape.size.y / 2.0)  # origin at feet, matches sprite
 	add_child(col)
 
 func _build_visual() -> void:
-	_visual = Polygon2D.new()
-	_visual.polygon = PackedVector2Array([
-		Vector2(-18.0, -28.0), Vector2(18.0, -28.0),
-		Vector2( 18.0,  28.0), Vector2(-18.0, 28.0),
-	])
-	_visual.color = Color(0.85, 0.2, 0.2)
-	add_child(_visual)
+	_sprite = EnemySprite.new()
+	_sprite.name = "Sprite"
+	add_child(_sprite)
 
 func _build_components() -> void:
 	health = HealthComponent.new()
@@ -124,6 +134,7 @@ func _build_hitboxes() -> void:
 	var hb_rect := RectangleShape2D.new()
 	hb_rect.size = Vector2(36.0, 56.0)
 	hb_col.shape = hb_rect
+	hb_col.position = Vector2(0.0, -hb_rect.size.y / 2.0)
 	hurtbox.add_child(hb_col)
 	add_child(hurtbox)
 	hurtbox.received_hit.connect(_on_hurtbox_received_hit)

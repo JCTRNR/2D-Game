@@ -1,6 +1,8 @@
 class_name EnemyStateMachine
 extends Node
 
+signal state_changed(state_name: String)
+
 var states: Dictionary = {}
 var current_state: EnemyState = null
 
@@ -23,6 +25,7 @@ func transition_to(state_name: String, params: Dictionary = {}) -> void:
 		current_state.exit()
 	current_state = next
 	current_state.enter(params)
+	state_changed.emit(state_name)
 
 func start(initial_state: String) -> void:
 	current_state = states.get(initial_state)

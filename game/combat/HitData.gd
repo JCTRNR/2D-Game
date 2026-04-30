@@ -1,32 +1,27 @@
 class_name HitData
-extends RefCounted
+extends Resource
 
-enum DamageType { LIGHT, HEAVY }
+@export var damage: int = 1
+@export var stagger_value: float = 20.0
+@export var knockback: Vector2 = Vector2(360, -120)
+@export var hit_pause: float = 0.04
+# source is not exported — Node refs can't live in a Resource asset
+var source: Node
 
-var damage: int = 0
-var damage_type: DamageType = DamageType.LIGHT
-var stagger_value: float = 0.0
-var knockback: Vector2 = Vector2.ZERO
-var source: Node = null
-
-# Timing window stub for future Arkham-style system.
-# 'true' means this hit landed within the perfect-timing window.
-var perfect_timing: bool = false
-
-static func make_light(dmg: int, stagger: float, kb: Vector2, src: Node) -> HitData:
+static func make_light(p_damage: int, p_stagger: float, p_knockback: Vector2, p_source: Node) -> HitData:
 	var h := HitData.new()
-	h.damage = dmg
-	h.damage_type = DamageType.LIGHT
-	h.stagger_value = stagger
-	h.knockback = kb
-	h.source = src
+	h.damage        = p_damage
+	h.stagger_value = p_stagger
+	h.knockback     = p_knockback
+	h.source        = p_source
+	h.hit_pause     = 0.04
 	return h
 
-static func make_heavy(dmg: int, stagger: float, kb: Vector2, src: Node) -> HitData:
+static func make_heavy(p_damage: int, p_stagger: float, p_knockback: Vector2, p_source: Node) -> HitData:
 	var h := HitData.new()
-	h.damage = dmg
-	h.damage_type = DamageType.HEAVY
-	h.stagger_value = stagger
-	h.knockback = kb
-	h.source = src
+	h.damage        = p_damage
+	h.stagger_value = p_stagger
+	h.knockback     = p_knockback
+	h.source        = p_source
+	h.hit_pause     = 0.07
 	return h

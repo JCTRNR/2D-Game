@@ -1,20 +1,42 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=8 format=3]
 
-[ext_resource type="Script" path="res://Main.gd" id="1"]
-[ext_resource type="Script" path="res://player/Player.gd" id="2"]
-[ext_resource type="Script" path="res://camera/GameCamera.gd" id="3"]
-[ext_resource type="Script" path="res://ui/HUD.gd" id="4"]
+[ext_resource type="Script" path="res://Main.gd" id="1_main"]
+[ext_resource type="Script" path="res://world/CombatMovementTestRoom.gd" id="2_room"]
+[ext_resource type="Script" path="res://player/Player.gd" id="3_player"]
+[ext_resource type="Script" path="res://camera/GameCamera.gd" id="4_camera"]
+[ext_resource type="Script" path="res://ui/HUD.gd" id="5_hud"]
+[ext_resource type="Script" path="res://enemies/TrainingDummy.gd" id="6_dummy"]
+[ext_resource type="Script" path="res://enemies/TestEnemy.gd" id="7_enemy"]
 
 [node name="Main" type="Node2D"]
-script = ExtResource("1")
+script = ExtResource("1_main")
+
+[node name="CombatMovementTestRoom" type="Node2D" parent="."]
+script = ExtResource("2_room")
 
 [node name="Player" type="CharacterBody2D" parent="."]
-script = ExtResource("2")
-position = Vector2(200, 900)
+position = Vector2(180, 760)
 z_index = 10
+script = ExtResource("3_player")
+
+[node name="TrainingDummy" type="CharacterBody2D" parent="."]
+position = Vector2(760, 760)
+z_index = 9
+script = ExtResource("6_dummy")
+
+[node name="TestEnemy" type="CharacterBody2D" parent="."]
+position = Vector2(1100, 760)
+z_index = 9
+script = ExtResource("7_enemy")
+
+[node name="TestEnemy2" type="CharacterBody2D" parent="."]
+position = Vector2(1550, 760)
+z_index = 9
+script = ExtResource("7_enemy")
 
 [node name="GameCamera" type="Camera2D" parent="."]
-script = ExtResource("3")
+position = Vector2(180, 760)
+script = ExtResource("4_camera")
 
 [node name="HUD" type="CanvasLayer" parent="."]
-script = ExtResource("4")
+script = ExtResource("5_hud")

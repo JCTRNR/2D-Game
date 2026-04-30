@@ -17,7 +17,7 @@ func boss_health_multiplier() -> float:
 # --- Ability unlock flags ---
 # Add new abilities here as the game grows.
 var unlocks: Dictionary = {
-	"dodge":       false,
+	"dodge":       true,   # available from the start
 	"double_jump": false,
 	"wall_jump":   false,
 	"wall_slide":  false,

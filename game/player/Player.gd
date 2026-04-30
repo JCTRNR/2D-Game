@@ -1,187 +1,214 @@
 class_name Player
 extends CharacterBody2D
 
-# ── Physics constants (HK-tuned for 1920×1080) ──────────────────────────────
-const SPEED             := 280.0
-const ACCELERATION      := 1800.0
-const DECELERATION      := 2200.0
-const AIR_ACCELERATION  := 1400.0
-const AIR_DECELERATION  := 800.0
+signal health_changed(current: int, max_value: int)
 
-const JUMP_VELOCITY           := -950.0
+# ── Physics constants ──────────────────────────────────────────────────────────
+const MAX_SPEED               := 360.0
+const ACCELERATION            := 2600.0
+const DECELERATION            := 3200.0
+const AIR_ACCELERATION        := 1600.0
+const AIR_DECELERATION        := 960.0
+const JUMP_VELOCITY           := -720.0
+const JUMP_RELEASE_MULTIPLIER := 0.45
 const JUMP_GRAVITY            := 1800.0
-const FALL_GRAVITY            := 3500.0
-const FAST_FALL_GRAVITY       := 5500.0
-const MAX_FALL_SPEED          := 1400.0
-const JUMP_RELEASE_MULTIPLIER := 0.5
+const FALL_GRAVITY            := 2350.0
+const FAST_FALL_GRAVITY       := 3400.0
+const MAX_FALL_SPEED          := 1100.0
+const COYOTE_TIME             := 0.12
+const INVINCIBLE_TIME         := 0.70
+const MAX_HEALTH              := 6
 
-const COYOTE_TIME      := 0.12
-const JUMP_BUFFER_TIME := 0.12
+# ── Collision layers ───────────────────────────────────────────────────────────
+const LAYER_PLAYER         := 1
+const LAYER_WORLD          := 4
+const LAYER_PLAYER_HITBOX  := 8
+const LAYER_PLAYER_HURTBOX := 32
+const LAYER_ENEMY_HURTBOX  := 64
 
-# ── State ─────────────────────────────────────────────────────────────────────
-var facing: float = 1.0
-var coyote_timer: float = 0.0
+# ── Public state (read/written by states and sprite) ──────────────────────────
+var facing: float           = 1.0
 var jump_buffer_timer: float = 0.0
+var coyote_timer: float      = 0.0
 
-# ── Component references ──────────────────────────────────────────────────────
+# ── Components (states access these directly) ─────────────────────────────────
 var input: PlayerInputHandler
-var state_machine: PlayerStateMachine
 var health: HealthComponent
-var stagger: StaggerComponent
-var hurtbox: Hurtbox
 var light_hitbox: Hitbox
 var heavy_hitbox: Hitbox
+var hurtbox: Hurtbox
 
-var _visual: Polygon2D
-var _hitbox_pivot: Node2D   # flips with facing, hitboxes are children of this
+var _sprite: PlayerSprite
+var _hitbox_pivot: Node2D
+var _invincible_timer: float = 0.0
+var _sm: PlayerStateMachine
 
 func _ready() -> void:
 	add_to_group("player")
-	_build_collision()
-	_build_visual()
-	_build_components()
+	collision_layer = LAYER_PLAYER
+	collision_mask  = LAYER_WORLD
+
+	_build_input()
+	_build_body()
+	_build_health()
 	_build_hitboxes()
 	_build_state_machine()
-	RoomManager.register_player(self)
+
+func _process(delta: float) -> void:
+	if _sprite == null:
+		return
+	# Invincibility blink (Hollow Knight style)
+	if _invincible_timer > 0.0:
+		_sprite.visible = fmod(_invincible_timer, 0.12) >= 0.06
+	else:
+		_sprite.visible = true
 
 func _physics_process(delta: float) -> void:
-	_tick_timers(delta)
-	move_and_slide()
+	# Refresh coyote while grounded; tick down once airborne
+	if is_on_floor():
+		coyote_timer = COYOTE_TIME
+	if coyote_timer > 0.0:      coyote_timer      -= delta
+	if jump_buffer_timer > 0.0: jump_buffer_timer -= delta
+	if _invincible_timer > 0.0: _invincible_timer -= delta
 
-# ── Movement helpers (called by states) ───────────────────────────────────────
-func apply_horizontal_movement(delta: float, accel: float, decel: float) -> void:
-	var dir := input.move_direction
-	if not is_zero_approx(dir):
-		velocity.x = move_toward(velocity.x, dir * SPEED, accel * delta)
-	else:
-		velocity.x = move_toward(velocity.x, 0.0, decel * delta)
+	# Buffer jump presses so landing within the window still jumps
+	if input != null and input.jump_pressed:
+		jump_buffer_timer = 0.12
 
+# ── Helper methods called by states ───────────────────────────────────────────
 func apply_gravity(delta: float, gravity: float) -> void:
 	velocity.y = min(velocity.y + gravity * delta, MAX_FALL_SPEED)
 
-func update_facing(direction: float) -> void:
-	if not is_zero_approx(direction):
-		facing = sign(direction)
-		_visual.scale.x = facing
-		_hitbox_pivot.scale.x = facing
-
-# ── Timer ticks ───────────────────────────────────────────────────────────────
-func _tick_timers(delta: float) -> void:
-	if is_on_floor():
-		coyote_timer = COYOTE_TIME
+func apply_horizontal_movement(delta: float, accel: float, decel: float) -> void:
+	var dir := input.move_direction
+	if not is_zero_approx(dir):
+		velocity.x = move_toward(velocity.x, dir * MAX_SPEED, accel * delta)
 	else:
-		coyote_timer = max(0.0, coyote_timer - delta)
+		velocity.x = move_toward(velocity.x, 0.0, decel * delta)
 
-	if input.jump_pressed:
-		jump_buffer_timer = JUMP_BUFFER_TIME
-	else:
-		jump_buffer_timer = max(0.0, jump_buffer_timer - delta)
+func update_facing(dir: float) -> void:
+	if not is_zero_approx(dir):
+		facing = sign(dir)
+		if _hitbox_pivot:
+			_hitbox_pivot.scale.x = facing
 
-# ── Hit reception ─────────────────────────────────────────────────────────────
-func _on_hurtbox_received_hit(hit_data: HitData) -> void:
-	if state_machine.current_state is DeadState:
+func get_debug_text() -> String:
+	var state_name := _sm.current_state.name if _sm and _sm.current_state else "—"
+	return "STATE: %s\nVEL: %s\nGROUND: %s\nHP: %s/%s" % [
+		state_name,
+		Vector2(round(velocity.x), round(velocity.y)),
+		str(is_on_floor()),
+		health.current_health,
+		health.max_health,
+	]
+
+# ── Hit reception ──────────────────────────────────────────────────────────────
+func take_hit(hit_data) -> void:
+	if _invincible_timer > 0.0:
 		return
-	health.take_damage(hit_data.damage)
+	if _sm and _sm.current_state is DeadState:
+		return
+
+	var damage   := 1
+	var knockback := Vector2(280.0, -260.0)
+	var source: Node = null
+
+	if hit_data is HitData:
+		damage    = hit_data.damage
+		knockback = hit_data.knockback
+		source    = hit_data.source
+	elif typeof(hit_data) == TYPE_DICTIONARY:
+		damage    = int(hit_data.get("damage", 1))
+		knockback = hit_data.get("knockback", knockback)
+		source    = hit_data.get("source", null)
+
+	# Always push away from the attacker regardless of attack direction
+	if source:
+		var away := sign(global_position.x - source.global_position.x)
+		if is_zero_approx(away): away = 1.0
+		knockback.x = abs(knockback.x) * away
+
+	_invincible_timer = INVINCIBLE_TIME
+	health.damage(damage)
+
+	if _sprite:
+		_sprite.flash_hurt()
+
 	if health.is_dead():
-		state_machine.transition_to("DeadState")
+		_sm.transition_to("DeadState")
 	else:
-		state_machine.transition_to("HurtState", {"knockback": hit_data.knockback})
+		_sm.transition_to("HurtState", {"knockback": knockback})
 
-func _on_hit_landed(target_hurtbox: Hurtbox, hit_data: HitData) -> void:
-	target_hurtbox.apply_hit(hit_data)
-
-# ── Node construction ─────────────────────────────────────────────────────────
-func _build_collision() -> void:
-	collision_layer = 1    # layer 1: player body
-	collision_mask  = 4    # collides with layer 3: world
-
-	var col   := CollisionShape2D.new()
-	var shape := RectangleShape2D.new()
-	shape.size = Vector2(28.0, 50.0)
-	col.shape  = shape
-	add_child(col)
-
-func _build_visual() -> void:
-	_visual = Polygon2D.new()
-	_visual.polygon = PackedVector2Array([
-		Vector2(-14.0, -25.0), Vector2(14.0, -25.0),
-		Vector2( 14.0,  25.0), Vector2(-14.0, 25.0),
-	])
-	_visual.color = Color(0.3, 0.6, 1.0)
-	add_child(_visual)
-
-	# Small directional nose so facing is visible at a glance
-	var nose := Polygon2D.new()
-	nose.polygon = PackedVector2Array([
-		Vector2(14.0, -7.0), Vector2(22.0, 0.0), Vector2(14.0, 7.0),
-	])
-	nose.color = Color(0.6, 0.85, 1.0)
-	_visual.add_child(nose)
-
-func _build_components() -> void:
+# ── Node construction ──────────────────────────────────────────────────────────
+func _build_input() -> void:
 	input = PlayerInputHandler.new()
+	input.name = "InputHandler"
 	add_child(input)
 
-	health = HealthComponent.new()
-	health.max_health = 5
-	add_child(health)
+func _build_body() -> void:
+	var col   := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size   = Vector2(42, 82)
+	col.shape    = shape
+	col.position = Vector2(0, -41)  # origin at feet
+	add_child(col)
 
-	stagger = StaggerComponent.new()
-	add_child(stagger)
+	_sprite = PlayerSprite.new()
+	_sprite.name = "Sprite"
+	add_child(_sprite)
+
+func _build_health() -> void:
+	health            = HealthComponent.new()
+	health.name       = "Health"
+	health.max_health = MAX_HEALTH
+	add_child(health)
+	health.health_changed.connect(health_changed.emit)
 
 func _build_hitboxes() -> void:
-	# Hurtbox ─ receives incoming hits
-	hurtbox = Hurtbox.new()
-	hurtbox.owner_entity  = self
-	hurtbox.collision_layer = 32   # layer 6: player hurtbox
-	hurtbox.collision_mask  = 0
-	var hb_col  := CollisionShape2D.new()
-	var hb_rect := RectangleShape2D.new()
-	hb_rect.size = Vector2(28.0, 50.0)
-	hb_col.shape = hb_rect
-	hurtbox.add_child(hb_col)
-	add_child(hurtbox)
-	hurtbox.received_hit.connect(_on_hurtbox_received_hit)
-
-	# Pivot node so hitboxes flip automatically with facing
-	_hitbox_pivot = Node2D.new()
+	# Pivot scales X with facing so hitboxes always extend in the right direction
+	_hitbox_pivot      = Node2D.new()
 	_hitbox_pivot.name = "HitboxPivot"
 	add_child(_hitbox_pivot)
 
-	# Light attack hitbox
-	light_hitbox = Hitbox.new()
-	light_hitbox.owner_entity    = self
-	light_hitbox.collision_layer = 8     # layer 4: player hitbox
-	light_hitbox.collision_mask  = 64    # detects layer 7: enemy hurtbox
-	var lh_col  := CollisionShape2D.new()
-	var lh_rect := RectangleShape2D.new()
-	lh_rect.size     = Vector2(50.0, 30.0)
-	lh_col.position  = Vector2(39.0, 0.0)
-	lh_col.shape     = lh_rect
-	light_hitbox.add_child(lh_col)
-	_hitbox_pivot.add_child(light_hitbox)
-	light_hitbox.hit_landed.connect(_on_hit_landed)
+	light_hitbox = _make_hitbox("LightHitbox", Vector2(76, 44),  Vector2(50, -8))
+	heavy_hitbox = _make_hitbox("HeavyHitbox", Vector2(104, 58), Vector2(64, -10))
 
-	# Heavy attack hitbox
-	heavy_hitbox = Hitbox.new()
-	heavy_hitbox.owner_entity    = self
-	heavy_hitbox.collision_layer = 8
-	heavy_hitbox.collision_mask  = 64
-	var hh_col  := CollisionShape2D.new()
-	var hh_rect := RectangleShape2D.new()
-	hh_rect.size     = Vector2(70.0, 40.0)
-	hh_col.position  = Vector2(49.0, 0.0)
-	hh_col.shape     = hh_rect
-	heavy_hitbox.add_child(hh_col)
-	_hitbox_pivot.add_child(heavy_hitbox)
-	heavy_hitbox.hit_landed.connect(_on_hit_landed)
+	# Defensive hurtbox — enemy hitboxes scan this layer
+	hurtbox                 = Hurtbox.new()
+	hurtbox.name            = "Hurtbox"
+	hurtbox.owner_entity    = self
+	hurtbox.collision_layer = LAYER_PLAYER_HURTBOX
+	hurtbox.collision_mask  = 0
+	var hb_col  := CollisionShape2D.new()
+	var hb_rect := RectangleShape2D.new()
+	hb_rect.size    = Vector2(38, 78)
+	hb_col.shape    = hb_rect
+	hb_col.position = Vector2(0, -39)
+	hurtbox.add_child(hb_col)
+	add_child(hurtbox)
+	hurtbox.received_hit.connect(take_hit)
+
+func _make_hitbox(hb_name: String, size: Vector2, offset: Vector2) -> Hitbox:
+	var hb              := Hitbox.new()
+	hb.name              = hb_name
+	hb.owner_entity      = self
+	hb.collision_layer   = LAYER_PLAYER_HITBOX
+	hb.collision_mask    = LAYER_ENEMY_HURTBOX
+	var col             := CollisionShape2D.new()
+	var rect            := RectangleShape2D.new()
+	rect.size            = size
+	col.shape            = rect
+	col.position         = offset
+	hb.add_child(col)
+	_hitbox_pivot.add_child(hb)
+	return hb
 
 func _build_state_machine() -> void:
-	state_machine = PlayerStateMachine.new()
-	state_machine.name = "StateMachine"
-	add_child(state_machine)
+	_sm      = PlayerStateMachine.new()
+	_sm.name = "StateMachine"
+	add_child(_sm)
 
-	var states_to_add: Array = [
+	var state_list: Array = [
 		["IdleState",        IdleState.new()],
 		["MoveState",        MoveState.new()],
 		["JumpState",        JumpState.new()],
@@ -192,10 +219,9 @@ func _build_state_machine() -> void:
 		["HurtState",        HurtState.new()],
 		["DeadState",        DeadState.new()],
 	]
-	for entry in states_to_add:
+	for entry: Array in state_list:
 		var s: PlayerState = entry[1]
 		s.name = entry[0]
-		state_machine.add_child(s)
+		_sm.add_child(s)
 
-	# Deferred so state_machine._ready() can finish populating its states dict first
-	state_machine.call_deferred("start", "IdleState")
+	_sm.call_deferred("start", "IdleState")

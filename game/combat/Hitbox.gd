@@ -1,36 +1,51 @@
 class_name Hitbox
 extends Area2D
 
-# Attach to a player or enemy attack.
-# Set owner_entity to the node that owns this hitbox.
-
-@export var owner_entity: Node = null
-
-# Emitted when this hitbox overlaps a Hurtbox.
-# The HitData is constructed by whoever activates this hitbox.
 signal hit_landed(hurtbox: Hurtbox, hit_data: HitData)
 
-var _active_hit_data: HitData = null
-var _hit_this_swing: Array[Node] = []
+var owner_entity: Node
+var one_hit_per_activation: bool = true
+var _active_hit: HitData = null
+var _hit_targets: Array[Node] = []
 
 func _ready() -> void:
-	# Layer 4 (player hitbox) or layer 5 (enemy hitbox) set on the scene node.
-	monitoring = false
-	monitorable = false
 	area_entered.connect(_on_area_entered)
+	monitoring = false
 
 func activate(hit_data: HitData) -> void:
-	_active_hit_data = hit_data
-	_hit_this_swing.clear()
+	_active_hit = hit_data
+	_hit_targets.clear()
 	monitoring = true
 
 func deactivate() -> void:
 	monitoring = false
-	_active_hit_data = null
+	_active_hit = null
 
 func _on_area_entered(area: Area2D) -> void:
-	if _active_hit_data == null:
+	if _active_hit == null:
 		return
-	if area is Hurtbox and area not in _hit_this_swing:
-		_hit_this_swing.append(area)
-		hit_landed.emit(area, _active_hit_data)
+
+	var target := area.get_parent()
+	if target == null:
+		return
+
+	if one_hit_per_activation and target in _hit_targets:
+		return
+	_hit_targets.append(target)
+
+	if area is Hurtbox:
+		area.apply_hit(_active_hit)
+		hit_landed.emit(area, _active_hit)
+	elif target.has_method("take_hit"):
+		# Backward-compat for nodes that don't use the Hurtbox class
+		target.take_hit(_active_hit)
+
+	_do_hit_pause(_active_hit.hit_pause)
+
+func _do_hit_pause(duration: float) -> void:
+	if duration <= 0.0:
+		return
+	var tree := get_tree()
+	tree.paused = true
+	await tree.create_timer(duration, true, false, true).timeout
+	tree.paused = false

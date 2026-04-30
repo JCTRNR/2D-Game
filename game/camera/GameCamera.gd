@@ -1,43 +1,47 @@
-class_name GameCamera
 extends Camera2D
 
-const LERP_SPEED      := 5.0
-const LOOK_AHEAD_DIST := 120.0
-const DEAD_ZONE       := 40.0
+@export var follow_speed: float = 9.0
+@export var look_ahead_distance: float = 120.0
+@export var vertical_offset: float = -120.0
+@export var min_x: float = -300.0
+@export var max_x: float = 2400.0
+@export var min_y: float = -500.0
+@export var max_y: float = 1000.0
 
-var _target: Node2D = null
-var _look_ahead: float = 0.0
+var target: Node2D
 
 func _ready() -> void:
-	add_to_group("camera")
+	make_current()
 	position_smoothing_enabled = false
-	drag_horizontal_enabled    = false
-	drag_vertical_enabled      = false
-	# Auto-find player — waits one frame so Player._ready() has run
-	await get_tree().process_frame
-	var player := get_tree().get_first_node_in_group("player") as Node2D
-	if player:
-		set_target(player)
+	zoom = Vector2(1.0, 1.0)
 
-func set_target(node: Node2D) -> void:
-	_target = node
-	if _target:
-		global_position = _target.global_position
+func set_room_bounds(x_min: float, x_max: float, y_min: float, y_max: float) -> void:
+	min_x = x_min
+	max_x = x_max
+	min_y = y_min
+	max_y = y_max
 
-func set_room_bounds(left: float, right: float, top_y: float, bottom: float) -> void:
-	limit_left   = int(left)
-	limit_right  = int(right)
-	limit_top    = int(top_y)
-	limit_bottom = int(bottom)
+func set_target(new_target: Node2D) -> void:
+	target = new_target
+	if target != null:
+		global_position = _get_target_position()
 
 func _process(delta: float) -> void:
-	if _target == null:
+	if target == null:
 		return
 
-	var player := _target as Player
-	if player:
-		var target_look := player.facing * LOOK_AHEAD_DIST
-		_look_ahead = lerp(_look_ahead, target_look, 8.0 * delta)
+	var desired := _get_target_position()
+	global_position = global_position.lerp(desired, 1.0 - exp(-follow_speed * delta))
 
-	var target_pos := _target.global_position + Vector2(_look_ahead, 0.0)
-	global_position = global_position.lerp(target_pos, LERP_SPEED * delta)
+func _get_target_position() -> Vector2:
+	var look_ahead := 0.0
+
+	if "facing" in target:
+		look_ahead = target.facing * look_ahead_distance
+
+	var desired := target.global_position + Vector2(look_ahead, vertical_offset)
+
+	desired.x = clamp(desired.x, min_x, max_x)
+	desired.y = clamp(desired.y, min_y, max_y)
+
+	return desired
